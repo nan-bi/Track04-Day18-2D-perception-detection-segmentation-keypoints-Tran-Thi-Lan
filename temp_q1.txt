@@ -1,0 +1,30 @@
+# 🧪 Lab — 2D Perception: Detection · Segmentation · Keypoints
+**AICB · Computer Vision · Track 4 · Ngày 18** — 120 phút — Google Colab (GPU T4)
+
+> 🏭 **Bài toán xuyên suốt.** Camera ở cổng nhà máy cần biết: **có bao nhiêu người**, **ai không đội mũ bảo hộ**, và **có ai vừa ngã**.
+> Trong 120 phút bạn tự tay dựng từng mảnh của câu trả lời đó.
+
+| Phần | Bạn làm gì | Mảnh ghép cho camera cổng | ⏱ |
+|---|---|---|---|
+| 0 | Setup, tải sẵn model và dữ liệu | — | 10' |
+| 1 · Detection | Tự viết IoU + NMS, so sánh YOLO26 có NMS và NMS-free | Đếm người | 35' |
+| 2 · Segmentation | Tự viết mask IoU, polygon ↔ mask, auto-label bằng SAM 2.1 | Tạo nhãn nhanh cho class mới (mũ bảo hộ) | 30' |
+| 3 · Keypoints | Tự viết OKS và góc khớp, dựng luật "ngã" | Phát hiện người ngã | 25' |
+| 4 · Fine-tune | Sửa `flip_idx`, train YOLO26n-pose trên tiger-pose, phân tích lỗi | Dạy model một đối tượng mới | 20' |
+
+### Cách làm việc với notebook này
+| Ký hiệu | Ý nghĩa |
+|---|---|
+| 🔮 **Dự đoán** | Tự nhẩm kết quả *trước khi* chạy ô. Không chấm điểm, nhưng đây là lúc bạn học được nhiều nhất. |
+| 🧩 **TODO** | Điền code vào chỗ có `...`. Mỗi chỗ chỉ 1 dòng. Chạy ô là có phản hồi ✅ / ❌ ngay bên dưới. |
+| 💡 **Gợi ý** | Bấm để mở. Kẹt quá 3 phút thì mở, đừng ngại. |
+| 🚦 **Chốt** | Ô `gate(...)` cuối mỗi mục TODO. Chưa xong thì notebook dừng ở đó. |
+| 🛟 **Phao** | Hết giờ của mục mà chưa xong: sửa thành `gate("...", lifeline=True)` để mượn bản thư viện và đi tiếp. Hàm mượn phao không được tính điểm. |
+| ❓ **Câu hỏi** | Trả lời 2–4 câu vào chuỗi `Q1 = """ ... """` ngay bên dưới (12 câu cả bài). |
+| ⭐ | Nâng cao, làm nếu còn thời gian hoặc về nhà. |
+
+### Nộp gì?
+Notebook đã **Restart & Run All** không lỗi + thư mục `submission/` do ô cuối cùng tạo ra (gồm `ket_qua.json` và `autolabel/bus.txt`). Chi tiết ở cuối notebook và trong `README.md`.Q1 = """
+(a) 640/32=20, 640/16=40, 640/8=80. 80*60 + 40*30 + 20*15 = 6300. Ít hơn 8400 vì ảnh bus không vuông (640x480 thay vì 640x640), số lượng giảm theo diện tích.
+(b) Nhãn gốc là xywh, nhưng bị đọc nhầm là cxcywh (tâm). Do đó, góc trên trái bị dịch đi một nửa kích thước box.
+"""
