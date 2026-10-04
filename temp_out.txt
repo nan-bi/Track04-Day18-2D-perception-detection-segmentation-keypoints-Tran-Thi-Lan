@@ -1,0 +1,28 @@
+def polygon_to_mask(poly: np.ndarray, h: int, w: int) -> np.ndarray:
+    """poly: (K,2) toạ độ pixel (x, y) → mask bool (H,W)."""
+    mask = np.zeros((h, w), dtype=np.uint8)
+    pts = np.round(poly).astype(np.int32)                         # cv2 cần toạ độ nguyên
+    # Tô kín đa giác bằng giá trị 1: cv2.fillPoly(ảnh, [danh sách đỉnh], màu)
+    cv2.fillPoly(mask, [pts], 1)                                  # 🧩
+    return mask.astype(bool)
+
+
+def mask_to_yolo_seg(mask: np.ndarray, cls_id: int, simplify: float = 0.002) -> str:
+    """mask bool (H,W) → 1 dòng nhãn YOLO-seg 'class x1 y1 x2 y2 ...' (toạ độ chuẩn hoá)."""
+    h, w = mask.shape
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return ""
+    # Bước 1 — mask có thể vỡ thành nhiều mảnh: lấy contour có DIỆN TÍCH lớn nhất (cv2.contourArea)
+    cnt = max(contours, key=cv2.contourArea)                      # 🧩
+    # Bước 2 (viết sẵn) — bỏ bớt đỉnh thừa
+    cnt = cv2.approxPolyDP(cnt, simplify * cv2.arcLength(cnt, True), True).reshape(-1, 2)     # (K,2) pixel (x, y)
+    if len(cnt) < 3:
+        return ""
+    # Bước 3 — chuẩn hoá về [0, 1]: x chia cho W, y chia cho H
+    norm = cnt / np.array([w, h])                                 # (K,2)  🧩
+    return f"{cls_id} " + " ".join(f"{v:.6f}" for v in norm.flatten())
+
+
+check_polygon_to_mask()
+check_mask_to_yolo_seg()

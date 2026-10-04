@@ -1,0 +1,69 @@
+---
+## Phần 2 — Segmentation (30')
+🏭 **Mảnh ghép 2: tạo nhãn cho class mới.** COCO không có class "mũ bảo hộ". Muốn fine-tune thì phải có nhãn, mà vẽ tay một mask polygon mất khoảng 80 giây.
+Phần này dựng pipeline **detector → SAM → polygon** để máy gán nhãn thay người.
+
+### 2A. Semantic và instance trên cùng một ảnh — 8'
+- **Semantic** (YOLO26n-sem, train trên Cityscapes, 19 class): mỗi *pixel* một class.
+- **Instance** (Mask R-CNN v2): mỗi *object* một mask riêng.
+
+🔮 **Dự đoán.** Ảnh có 4 người. Nếu lấy bản đồ semantic của class `person` rồi đếm số vùng liên thông, bạn sẽ đếm được mấy "người"?
+---
+from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
+
+# --- Semantic: mỗi pixel một class ---
+yolo_sem = YOLO("yolo26n-sem.pt")
+r_sem = yolo_sem.predict(IMG_BUS, verbose=False)[0]
+sem = r_sem.semantic_mask.data.cpu().long()                       # (H, W): class id của từng pixel
+SEM_NAMES = yolo_sem.names
+sem_ids = sem.unique().tolist()
+print("Semantic :", tuple(sem.shape), "— tỉ lệ pixel:",
+      {SEM_NAMES[k]: f"{(sem == k).float().mean():.0%}" for k in sem_ids if (sem == k).float().mean() > 0.01})
+
+# --- Instance: mỗi object một mask ---
+w_ins = MaskRCNN_ResNet50_FPN_V2_Weights.DEFAULT                  # COCO box AP 47.4 / mask AP 41.8
+mrcnn = maskrcnn_resnet50_fpn_v2(weights=w_ins).eval().to(DEVICE)
+with torch.inference_mode():
+    o = mrcnn([w_ins.transforms()(img_bus).to(DEVICE)])[0]
+o = {k: v.cpu() for k, v in o.items()}
+keep = o["scores"] > 0.5
+masks_mrcnn = o["masks"][keep, 0] > 0.5                           # (N,1,H,W) xác suất → (N,H,W) bool
+labels_mrcnn = o["labels"][keep]
+print("Instance :", tuple(o["masks"].shape), "→ giữ score > 0.5 →", tuple(masks_mrcnn.shape), [COCO_TV[c] for c in labels_mrcnn])
+
+show(draw_segmentation_masks(img_bus, torch.stack([sem == k for k in sem_ids]), alpha=0.6),
+     draw_segmentation_masks(img_bus, masks_mrcnn, alpha=0.6),
+     titles=["Semantic — YOLO26n-sem: mọi người cùng một màu", f"Instance — Mask R-CNN v2: {len(masks_mrcnn)} mask riêng"])
+---
+# Đếm người bằng bản đồ semantic có được không?
+person_id = next(k for k, v in SEM_NAMES.items() if v == "person")
+n_cc, cc, stats, _ = cv2.connectedComponentsWithStats((sem == person_id).numpy().astype(np.uint8))
+n_inst = int((labels_mrcnn == COCO_TV.index("person")).sum())
+print(f"Vùng liên thông của class 'person': {n_cc - 1} vùng, diện tích (pixel): {sorted(stats[1:, cv2.CC_STAT_AREA].tolist(), reverse=True)}")
+print(f"Mask R-CNN: {n_inst} người · Thực tế: 4 người")
+
+# Xe buýt được gán class gì?
+bx1, by1, bx2, by2 = r_e2e.boxes.xyxy[r_e2e.boxes.cls == 5][0].int().tolist()
+ids, cnt = sem[by1:by2, bx1:bx2].unique(return_counts=True)
+print("Bên trong box 'bus' của detector, semantic nói:", {SEM_NAMES[int(i)]: f"{int(n) / int(cnt.sum()):.0%}" for i, n in zip(ids, cnt) if n / cnt.sum() > 0.03})
+show(np.ma.masked_equal(cc, 0), titles=["Mỗi màu là một vùng liên thông của class 'person'"], size=5)
+---
+# Áp dụng: mask của YOLO26n-seg giống mask của Mask R-CNN đến đâu? Ghép cặp bằng Hungarian matching (như DETR).
+yolo_seg = YOLO("yolo26n-seg.pt")
+rs = yolo_seg.predict(IMG_BUS, conf=0.25, verbose=False)[0]
+H, W = img_bus.shape[-2:]
+masks_yolo = torch.from_numpy(np.stack([polygon_to_mask(p, H, W) for p in rs.masks.xy]))     # polygon của YOLO → mask
+iou_mat = mask_iou(masks_yolo, masks_mrcnn)                                                # (số mask YOLO, số mask Mask R-CNN)
+ri, ci = linear_sum_assignment(-iou_mat.numpy())                                           # ghép 1–1 sao cho tổng IoU lớn nhất
+show_table([{"YOLO26n-seg": f"#{i} {NAMES[int(rs.boxes.cls[i])]}", "Mask R-CNN v2": f"#{j} {COCO_TV[labels_mrcnn[j]]}",
+             "mask IoU": float(iou_mat[i, j])} for i, j in zip(ri, ci)], title="Ghép cặp bằng Hungarian matching")
+show(bgr_to_u8(rs.plot()), draw_segmentation_masks(img_bus, masks_mrcnn, alpha=0.6), titles=["YOLO26n-seg", "Mask R-CNN v2"])
+---
+❓ **Q5.** (a) YOLO26-seg tạo mask bằng *32 prototype dùng chung × hệ số riêng của từng object*, còn Mask R-CNN dự đoán một mask 28×28 cho từng RoI. Mỗi cách cho biên mask thô ở object **lớn** hay **nhỏ**, vì sao?
+(b) Ô trên ghép cặp bằng Hungarian matching. Nếu thay bằng "mỗi mask YOLO lấy mask Mask R-CNN có IoU cao nhất" thì có thể sai ở đâu?
+---
+Q5 = """
+(a) YOLO26-seg cho biên mịn ở object lớn nhờ resolution mask toàn cục. Mask R-CNN cắt 28x28 cho mọi object, upsample object lớn sẽ bị răng cưa.
+(b) Bounding box YOLO có thể lệch nhỏ với mask RCNN, gây lỗi khớp nhãn.
+"""
+---
